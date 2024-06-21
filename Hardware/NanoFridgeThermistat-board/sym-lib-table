@@ -1,5 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "CurrentTransformes")(type "KiCad")(uri "${KIPRJMOD}/SymbolLibs/CurrentTransformes.kicad_sym")(options "")(descr ""))
-  (lib (name "CurrentTransformers")(type "KiCad")(uri "${KIPRJMOD}/SymbolLibs/CurrentTransformers.kicad_sym")(options "")(descr ""))
-)

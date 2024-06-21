@@ -8,7 +8,7 @@
 #include "Core/current.h"
 #include "Core/mcu_time.h"
 #include "Core/thermistor.h"
-#include "Core/thermistor_ntc_100k_3950K.h"
+#include "Core/ntc_10k_3977.h"
 
 #include "Core/led.h"
 
@@ -96,17 +96,15 @@
 // ################################################################################################################################################
 
 // Pin mapping
-const uint8_t motor_control_pin = 2; // D2
-const uint8_t status_led_pin    = 3; // D3 -> PORTD3 of the atmega328PB Mcu
-const uint8_t minus_button_pin  = 4; // D4
-const uint8_t plus_button_pin   = 5; // D5
+const uint8_t motor_control_pin = 5; // D5
+const uint8_t status_led_pin_1  = 7; // D7
+const uint8_t status_led_pin_2  = 6; // D6
 
-const uint8_t  temp_sensor_pin    = A0;    /**> NTC thermistor temperature sensor input pin             */
-const uint8_t  current_sensor_pin = A1;    /**> Current sens input pin, sampled @ 500Hz - 1kHz          */
-const uint16_t upper_resistance   = 330U;  /**> 320 kOhms resistor is used as the upper bridge resistor */
+const uint8_t  button_pin         = 3; // D3
+const uint8_t  temp_sensor_pin    = A3;    /**> NTC thermistor temperature sensor input pin             */
+const uint8_t  potentiometer_pin  = A2;    /**> Current sens input pin, sampled @ 500Hz - 1kHz          */
+const uint16_t upper_resistance   = 10U;   /**> 320 kOhms resistor is used as the upper bridge resistor */
 const uint16_t vcc_mv             = 5000U; /**> Board is powered via USB -> 5V                          */
-
-const uint8_t led_driver_index = 0U;
 
 // ################################################################################################################################################
 // ################################################### Application state machine ##################################################################
@@ -117,39 +115,27 @@ const uint8_t led_driver_index = 0U;
  */
 typedef enum
 {
-    APP_STATE_NORMAL,             /**> Normal fridge operation                                                                                  */
-    APP_STATE_POST_BOOT_WAIT,     /**> Post boot time window waits for 5 seconds without triggering the compressor.
-                                       This allows the user to enter the Learning mode when exiting the boot.                                   */
-    APP_STATE_MOTOR_STALLED,      /**> Motor stalled condition was detected, waiting for 5 minutes before trying again                          */
-    APP_STATE_WAITING_START_MOTOR /**> We are waiting before restarting the motor. This is done before we run into the MOTOR STALLED condition  */
+    APP_STATE_TEMP_CONTROL,     /**> Regular temperature controlled scheme                  */
+    APP_STATE_MANUAL_CONTROL,   /**> Uses the potentiometer as the source of input data     */
+    APP_STATE_FULL_STEAM,       /**> Motor output is set to 100%                            */
+    APP_STATE_DISABLED          /**> Motor is disabled                                      */
 } app_state_t;
+
+#define APP_STATE_ENUM_COUNT 4U
 
 typedef struct
 {
     app_state_t app_state; /**> Tracks application current state                                               */
-    /**
-     * @brief maps the start time conditions in a union
-     * (because we are only using one value at a time, they are mutually exclusive)
-     */
-    union
-    {
-        uint32_t stalled_cond_time;  /**> Keeps track of the stalled condition start in time */
-        uint32_t motor_start_time;   /**> Keeps track of the time where motor was started    */
-        uint32_t motor_stopped_time; /**> Keeps track of the time where motor was shut off  */
-    } tracking;
 
     /**
      * @brief Keeps track of button events (either Pressed, Released, or Hold)
      */
     struct
     {
-        button_state_t plus_event;      /**> Plus button event                                                                                   */
-        button_state_t prev_plus_event; /**> Used to detect the change in button event (detecting from Pressed to Hold and from Hold to Release) */
-
         // We need to detect transistion from the PRESSED event to the HOLD event exactly once
-        button_state_t minus_event;      /**> Minus button event                                                                                  */
-        button_state_t prev_minus_event; /**> Used to detect the change in button event (detecting from Pressed to Hold and from Hold to Release) */
-    } buttons;
+        button_state_t now;      /**> Minus button event                                                                                  */
+        button_state_t prev; /**> Used to detect the change in button event (detecting from Pressed to Hold and from Hold to Release) */
+    } button;
 
 } app_working_mem_t;
 
@@ -160,26 +146,14 @@ typedef struct
     uint16_t current_rms;
 } app_sensors_t;
 
-// Default configuration initialisation
-static persistent_config_t config = {
-    .header             = PERMANENT_STORAGE_HEADER,
-    .target_temperature = 4,
-    .current_threshold  = 500,
-    .footer             = PERMANENT_STORAGE_FOOTER,
-};
-
-static led_io_t leds[1U] = {{.port = &PORTD, .pin = status_led_pin}};
-
-// ################################################################################################################################################
 // ####################################################### Static declarations ####################################################################
 // ################################################################################################################################################
+// ################################################################################################################################################
 
-static void read_buttons_events(button_state_t* const plus_button_event, button_state_t* const minus_button_event, const mcu_time_t* time);
-static void handle_normal_operation_loop(app_working_mem_t* const app_mem, int16_t const* const current_rms, const int8_t temperature,
-                                         const mcu_time_t* time);
+static void read_button_event(button_state_t* const event, const mcu_time_t* time);
 static void set_motor_output(const uint8_t value);
-static bool is_motor_started(void);
 static void read_temperature(const mcu_time_t* time, int8_t* temperature);
+static void read_potentiometer(const mcu_time_t* time, uint16_t* value);
 
 #ifndef NO_CURRENT_MONITORING
 static app_state_t handle_motor_stalled_loop(uint32_t const* const start_time, const mcu_time_t* time);
@@ -192,36 +166,17 @@ static circular_buffer_t voltage_buffer;
 
 void setup()
 {
-    pinMode(minus_button_pin, INPUT);
-    pinMode(plus_button_pin, INPUT);
-    pinMode(motor_control_pin, OUTPUT);
-    pinMode(status_led_pin, OUTPUT);
+    pinMode(button_pin, INPUT);
     pinMode(temp_sensor_pin, INPUT);
-    pinMode(current_sensor_pin, INPUT);
+    pinMode(potentiometer_pin, INPUT);
+
+    pinMode(motor_control_pin, OUTPUT);
+    pinMode(status_led_pin_1, OUTPUT);
+    pinMode(status_led_pin_2, OUTPUT);
 
     timebase_init();
 
     LOG_INIT();
-
-    if (FORCE_OVERWRITE_EEPROM || persistent_mem_is_first_boot(PERMANENT_STORAGE_HEADER, PERMANENT_STORAGE_FOOTER))
-    {
-        LOG("Detected first boot condition, writing default config to EEPROM.\n");
-        // Writes the default config on first boot so that it's a known starting
-        // point for subsequent eeprom references.
-        persistent_mem_write_config(&config);
-        persistent_mem_read_config(&config);
-    }
-    else
-    {
-        LOG("Reading config from EEPROM.\n");
-        // Otherwise, read back config from EEPROM
-        persistent_mem_read_config(&config);
-        LOG_CUSTOM("Read target temp in config : %d°C\n", config.target_temperature)
-        LOG_CUSTOM("Read current threshold in config : %umA\n", (unsigned int)config.current_threshold)
-    }
-
-    led_init(leds, 1U);
-    // led_set_blink_pattern(led_driver_index, LED_BLINK_NONE);
     sei();
 
 #ifdef DEBUG_CURRENT_VOLTAGE
@@ -233,7 +188,8 @@ void loop()
 {
     static const mcu_time_t* time        = NULL;
     static int8_t            temperature = 0;
-    static int16_t           current_ma  = 0;
+    static uint8_t           motor_pwm   = 0U; // Motor PWM (as per analogWrite) ranges from 0 to 255
+    static uint16_t          pot_value   = 0U;
 
 #ifdef DEBUG_REPORT_PERIODIC
     static mcu_time_t previous_time;
@@ -241,99 +197,76 @@ void loop()
 
     // Keeps track of the previous time the system was toggled
     static app_working_mem_t app_mem = {
-        .app_state = APP_STATE_POST_BOOT_WAIT,
-        .tracking  = {.motor_start_time = 0},
-        .buttons =
+        .app_state = APP_STATE_TEMP_CONTROL,
+        .button =
             {
-                .plus_event       = BUTTON_STATE_RELEASED,
-                .prev_plus_event  = BUTTON_STATE_RELEASED,
-                .minus_event      = BUTTON_STATE_RELEASED,
-                .prev_minus_event = BUTTON_STATE_RELEASED,
+                .now  = BUTTON_STATE_RELEASED,
+                .prev = BUTTON_STATE_RELEASED,
             }, // Trailing comma is used to work around clang-format issues with struct fields initialization formatting
     };
-
-    int16_t current_rms    = 0;
-    bool    config_changed = false;
 
     // Very important to process the current time as fast as we can (polling mode)
     timebase_process();
     time = timebase_get_time();
-    led_process(time);
 
-#ifndef NO_CURRENT_MONITORING
-    // Current is read at around 1kHz
-    read_current(time, &current_ma, &current_rms);
-#endif
     // Temperature is read once every 2 seconds
     read_temperature(time, &temperature);
 
+    // Potentiometer is read at every loop
+    read_potentiometer(time, &pot_value);
+
     // Process button events.
     // Used to trigger
-    read_buttons_events(&app_mem.buttons.plus_event, &app_mem.buttons.minus_event, time);
+    read_button_event(&app_mem.button.now, time);
 
     // User pressed and release the + button.
     // Raise temp set point by one degree
-    if (app_mem.buttons.plus_event == BUTTON_STATE_RELEASED && app_mem.buttons.prev_plus_event != app_mem.buttons.plus_event
-        && app_mem.buttons.prev_plus_event != BUTTON_STATE_HOLD)
+    if (app_mem.button.now == BUTTON_STATE_PRESSED && app_mem.button.prev != app_mem.button.now)
     {
-        config.target_temperature++;
-        LOG("Button + Clicked !\n");
-
-        // Clamp max temperature to max of NTC curve
-        if (config.target_temperature > thermistor_ntc_100k_3950K_data.data[thermistor_ntc_100k_3950K_data.sample_count - 1U].temperature)
-        {
-            config.target_temperature = thermistor_ntc_100k_3950K_data.data[thermistor_ntc_100k_3950K_data.sample_count - 1U].temperature;
-        }
-        config_changed = true;
-        LOG_CUSTOM("-> New temp : %hd °C\n", config.target_temperature);
+        app_mem.app_state = (app_state_t)((app_mem.app_state + 1) % APP_STATE_ENUM_COUNT);
+        LOG_CUSTOM("Button Clicked ! Switching to mode %d\n", (uint8_t)app_mem.app_state);
     }
 
-    // User pressed and release the - button.
-    // Reduce temp set point by one degree
-    if (app_mem.buttons.minus_event == BUTTON_STATE_RELEASED && app_mem.buttons.prev_minus_event != app_mem.buttons.minus_event
-        && app_mem.buttons.prev_minus_event != BUTTON_STATE_HOLD)
-
-    {
-        LOG("Button - Clicked !\n");
-        config.target_temperature--;
-
-        // Clamp max temperature to min of NTC curve
-        if (config.target_temperature < thermistor_ntc_100k_3950K_data.data[0U].temperature)
-        {
-            config.target_temperature = thermistor_ntc_100k_3950K_data.data[0U].temperature;
-        }
-        config_changed = true;
-        LOG_CUSTOM("-> New temp : %hd °C\n", config.target_temperature);
-    }
-
-    // Only update persistent configuration if it has changed (reduces the amount of writes)
-    if (config_changed)
-    {
-        LOG("Writing configuration to EEPROM\n");
-        persistent_mem_write_config(&config);
-    }
 
     switch (app_mem.app_state)
     {
-#ifndef NO_CURRENT_MONITORING
-        case APP_STATE_MOTOR_STALLED: {
-            app_mem.app_state = handle_motor_stalled_loop(&app_mem.tracking.stalled_cond_time, time);
+        case APP_STATE_TEMP_CONTROL:
+            // linear ramp between 20°C and 40°C ; value is clamped to min and max.
+            if(temperature >= 20)
+            {
+                range_uint8_t input_range = {
+                    .start = 20,
+                    .end = 40
+                };
+                range_uint8_t output_range = {
+                    .start = 0,
+                    .end = UINT8_MAX
+                };
+                motor_pwm = interpolation_linear_uint8_to_uint8((uint8_t) temperature, &input_range, &output_range);
+            }
+            else
+            {
+                motor_pwm = 0;
+            }
             break;
-        }
-#endif
 
-        case APP_STATE_POST_BOOT_WAIT:
-        case APP_STATE_NORMAL:
-        case APP_STATE_WAITING_START_MOTOR:
+        case APP_STATE_MANUAL_CONTROL:
+            motor_pwm = pot_value;
+            break;
+
+        case APP_STATE_FULL_STEAM:
+            motor_pwm = UINT8_MAX;
+            break;
+
+        case APP_STATE_DISABLED:
         default: {
-            handle_normal_operation_loop(&app_mem, &current_rms, temperature, time);
+            motor_pwm = 0;
             break;
         }
     }
 
-    // Update previous buttons states
-    app_mem.buttons.prev_minus_event = app_mem.buttons.minus_event;
-    app_mem.buttons.prev_plus_event  = app_mem.buttons.plus_event;
+    set_motor_output(motor_pwm);
+    app_mem.button.prev  = app_mem.button.now;
 
 #if DEBUG_REPORT_PERIODIC == 1
     if ((time->seconds - previous_time.seconds) > DEBUG_REPORT_PERIOD_SECONDS)
@@ -341,20 +274,6 @@ void loop()
         // Report few things about current states
         previous_time = *time;
         LOG_CUSTOM("temperature : %hd °C\n", temperature);
-        LOG_CUSTOM("current : %hd mA\n", current_ma);
-        LOG_CUSTOM("current RMS: %hd mA\n", current_rms);
-        LOG_CUSTOM("config.target_temperature : %hd °C\n", config.target_temperature);
-        LOG_CUSTOM("config.current_threshold : %hu mA\n\n", config.current_threshold);
-
-#ifdef DEBUG_RMS_CURRENT
-        // DEBUG RMS current calculation
-        static int16_t rms_data[CURRENT_MEASURE_SAMPLES_PER_SINE] = {0};
-        current_export_internal_data(&rms_data);
-        for (uint8_t i = 0; i < CURRENT_MEASURE_SAMPLES_PER_SINE; i++)
-        {
-            LOG_CUSTOM("RMS data [%hu] = %hd\n", i, rms_data[i]);
-        }
-#endif
 
 #ifdef DEBUG_CURRENT_VOLTAGE
         for (uint8_t i = 0; i < CURRENT_MEASURE_SAMPLES_PER_SINE; i++)
@@ -366,166 +285,27 @@ void loop()
 #endif
 }
 
-static void read_buttons_events(button_state_t* const plus_button_event, button_state_t* const minus_button_event, const mcu_time_t* time)
+static void read_button_event(button_state_t* const event, const mcu_time_t* time)
 {
-    static button_local_mem_t plus_button_mem = {
-        .current  = LOW,
-        .previous = LOW,
-        .pressed  = 0,
-        .event    = BUTTON_STATE_RELEASED,
-    };
-    static button_local_mem_t minus_button_mem = {
+    static button_local_mem_t button_mem = {
         .current  = LOW,
         .previous = LOW,
         .pressed  = 0,
         .event    = BUTTON_STATE_RELEASED,
     };
 
-    plus_button_mem.current  = digitalRead(plus_button_pin);
-    minus_button_mem.current = digitalRead(minus_button_pin);
+    button_mem.current  = digitalRead(button_pin);
 
-    read_single_button_event(&plus_button_mem, &time->seconds);
-    read_single_button_event(&minus_button_mem, &time->seconds);
-
-    *plus_button_event  = plus_button_mem.event;
-    *minus_button_event = minus_button_mem.event;
+    read_single_button_event(&button_mem, &time->seconds);
+    *event = button_mem.event;
 }
 
-#ifndef NO_CURRENT_MONITORING
-static app_state_t handle_motor_stalled_loop(uint32_t const* const start_time, const mcu_time_t* time)
-{
-    // Wait for 5 minutes before exiting this state
-    uint32_t elapsed_time = time->seconds - *start_time;
-    if (elapsed_time >= STALLED_MOTOR_WAIT_SECONDS)
-    {
-        LOG("Motor stalled timeout condition reached -> Reverting to normal mode.\n");
-        // Revert to normal operation mode
-        return APP_STATE_NORMAL;
-    }
-    return APP_STATE_MOTOR_STALLED;
-}
-#endif
 
-static void handle_normal_operation_loop(app_working_mem_t* const app_mem, int16_t const* const current_rms, const int8_t temperature,
-                                         const mcu_time_t* time)
-{
-    // Only trigger this event once, at first detection of the button
-    // HOLD event, not the subsequent ones.
 
-    // clang-format off
-    if ((BUTTON_STATE_HOLD == app_mem->buttons.minus_event)
-    && (app_mem->buttons.prev_minus_event != app_mem->buttons.minus_event))
-    // clang-format on
-    {
-        LOG("Button - hold condition detected : Reverting current threshold to default.\n");
-        // Reset memory back to default (starts a new "Learning" mode)
-        config.current_threshold = 0;
-        persistent_mem_write_config(&config);
-        led_set_blink_pattern(led_driver_index, LED_BLINK_ACCEPT);
-
-        led_next_event_t event = {.kind = LED_NEXT_EVENT_PATTERN, .data = {.pattern = LED_BLINK_BREATHING}};
-        led_set_next_event(led_driver_index, &event);
-
-        if (is_motor_started())
-        {
-            // Reset the tracker so that we start counting from now on
-            app_mem->tracking.motor_start_time = time->seconds;
-        }
-    }
-
-    // Just learnt new "normal" motor behavior ! Save it to persistent memory
-    bool motor_run_long_enough = (time->seconds - app_mem->tracking.motor_start_time) > STEADY_MOTOR_RUNTIME;
-    if (is_motor_started() && (config.current_threshold == 0) && (motor_run_long_enough))
-    {
-        config.current_threshold = *current_rms;
-        led_set_blink_pattern(led_driver_index, LED_BLINK_ACCEPT);
-        led_next_event_t event = {.kind = LED_NEXT_EVENT_IO_STATE, .data = {.io_state = (uint8_t)HIGH}};
-        led_set_next_event(led_driver_index, &event);
-
-        persistent_mem_write_config(&config);
-        LOG("Learnt new basis current for normal operation ; Saving to EEPROM\n");
-        LOG_CUSTOM("Current : %u, threshold : %u\n", *current_rms, config.current_threshold)
-    }
-
-#ifndef NO_CURRENT_MONITORING
-    // Detected stalled motor, stop trying to trigger the compressor for now
-    bool overcurrent_detected = *current_rms > (int16_t)(((100 + STALLED_CURRENT_MULTIPLIER_PERCENT) * config.current_threshold) / 100);
-
-    // Wait for about 10 seconds to allow the motor to get back up to speed
-    // clang-format off
-    if ((config.current_threshold > 0)
-    &&  (overcurrent_detected)
-    &&  (time->seconds - app_mem->tracking.motor_stopped_time >= STALLED_MOTOR_IMMUNE_PERIOD_AFTER_RESTART))
-    // clang-format on
-    {
-        LOG("Overcurrent detected, motor is probably stalled. Waiting for pressure to equalize in heat pump circuit.\n");
-        app_mem->app_state = APP_STATE_MOTOR_STALLED;
-        set_motor_output(LOW);
-        app_mem->tracking.stalled_cond_time = time->seconds;
-
-        led_set_blink_pattern(led_driver_index, LED_BLINK_WARNING);
-        return;
-    }
-#endif
-
-    // Simple hysteresis to control the compressor based on a target temperature
-    if (!is_motor_started() && (temperature > (int8_t)(config.target_temperature + TEMP_HYSTERESIS_HIGH)))
-    {
-        uint32_t elapsed_seconds = (time->seconds - app_mem->tracking.motor_stopped_time);
-
-        // app_mem->tracking.motor_start_time == 0 -> Checks if we have just booted
-        // That's the only case where we can bypass the "waiting" period as we have no clue
-        // It means that we have just booted for the first time and we'll need to discover whether the motor can be driven or not
-        // Otherwise :
-        // Don't try to restart the motor right after a stop, need to wait for pressure to equalize in the system
-        // Otherwise we might run in the motor stalled condition
-        if (app_mem->tracking.motor_start_time == 0 || elapsed_seconds >= STALLED_MOTOR_WAIT_SECONDS)
-        {
-            // Start the compressor
-            LOG("Starting motor : temperature is high enough.\n");
-            set_motor_output(HIGH);
-            app_mem->tracking.motor_start_time = time->seconds;
-            led_set_blink_pattern(led_driver_index, LED_BLINK_NONE);
-            led_blink_none_set_io(led_driver_index, HIGH);
-        }
-        else
-        {
-            // Only called once when we transition to this new state
-            if (APP_STATE_WAITING_START_MOTOR != app_mem->app_state)
-            {
-                led_set_blink_pattern(led_driver_index, LED_BLINK_BREATHING);
-                app_mem->app_state = APP_STATE_WAITING_START_MOTOR;
-            }
-
-#ifdef DEBUG_REPORT_PERIODIC
-            // Print periodically the current waiting status
-            static uint32_t last_print_time = 0;
-            if ((time->seconds - last_print_time) >= DEBUG_REPORT_PERIOD_SECONDS_MOTOR_RESTART_ETA)
-            {
-                LOG_CUSTOM("Waiting to restart motor. ETA : %lu seconds.\n", (STALLED_MOTOR_WAIT_SECONDS - elapsed_seconds));
-                last_print_time = time->seconds;
-            }
-#endif
-        }
-    }
-    else if (is_motor_started() && (temperature < (int8_t)(config.target_temperature - TEMP_HYSTERESIS_LOW)))
-    {
-        LOG("Stopping motor : temperature is low enough.\n");
-        // Stop the compressor
-        set_motor_output(LOW);
-        app_mem->tracking.motor_stopped_time = time->seconds;
-    }
-}
-
-static bool is_motor_started(void)
-{
-    return digitalRead(motor_control_pin) == HIGH;
-}
 
 void set_motor_output(const uint8_t value)
 {
-    digitalWrite(motor_control_pin, value);
-    digitalWrite(status_led_pin, value);
+    analogWrite(motor_control_pin, (int) value);
 }
 
 static void read_temperature(const mcu_time_t* time, int8_t* temperature)
@@ -545,7 +325,7 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
         uint16_t ntc_resistance = 0;
         bridge_get_lower_resistance(&upper_resistance, &temp_reading_mv, &vcc_mv, &ntc_resistance);
 
-        *temperature = thermistor_read_temperature(&thermistor_ntc_100k_3950K_data, &ntc_resistance);
+        *temperature = thermistor_read_temperature(&ntc_10k_3977_data, &ntc_resistance);
 
 #if DEBUG_TEMP
         LOG_CUSTOM("Temp mv : %u mV\n", temp_reading_mv)
@@ -556,6 +336,14 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
         LOG_CUSTOM("Temp raw : %u /1024\n", temp_reading_raw)
 #endif
     }
+}
+
+static void read_potentiometer(const mcu_time_t* time, uint16_t* value)
+{
+    *value = analogRead(potentiometer_pin);
+#if DEBUG_TEMP
+        LOG_CUSTOM("Pot value : %u /1024\n", potentiometer_pin);
+#endif
 }
 
 #ifndef NO_CURRENT_MONITORING

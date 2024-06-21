@@ -1,6 +1,0 @@
-(fp_lib_table
-  (version 7)
-  (lib (name "CurrentTransformer")(type "KiCad")(uri "${KIPRJMOD}/FootprintLibs/CurrentTransformer.pretty")(options "")(descr ""))
-  (lib (name "TEConnectors")(type "KiCad")(uri "${KIPRJMOD}/FootprintLibs/TEConnectors.pretty")(options "")(descr ""))
-  (lib (name "Panelization")(type "KiCad")(uri "${KIPRJMOD}/FootprintLibs/Panelization.pretty")(options "")(descr ""))
-)

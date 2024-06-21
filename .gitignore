@@ -32,3 +32,6 @@ Hardware/**/Gerbers.zip
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Excel spreadsheets lock files
+~$*.ods

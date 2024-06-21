@@ -44,6 +44,7 @@ def write_cplusplus_extern_end(file : TextIOWrapper) :
 
 def generate_header(filepath : Path, name : str, sample_count : int) -> None :
     header_define = name.upper() + "_HEADER"
+    print(f"   -> Writing header file {filepath} ... ")
 
     with open(filepath, "w") as file :
         file.write(f"#ifndef {header_define}\n")
@@ -85,6 +86,7 @@ def generate_data(r0 : int, beta : int, count : int, min_temp : int, max_temp : 
     return thermistor_data
 
 def generate_source_file(filepath : Path, name : str, data : ThermistorData) -> None :
+    print(f"   -> Writing source file {filepath} ... ")
     with open(filepath, "w") as file :
         file.write(f"#include \"{name}.h\"\n\n")
         file.write(f"const thermistor_data_t {name}_data =  {{\n")
@@ -137,7 +139,7 @@ def main(args : list[str]) -> int:
     thermistor_data = generate_data(r0, beta, count - 1, C_MIN_TEMP, C_MAX_TEMP)
     print("2 - Generating header file")
     generate_header(output_directory.joinpath(name + ".h"), name, len(thermistor_data.data))
-    print("3 - Generating source file")
+    print(f"3 - Generating source file in {output_directory}")
     generate_source_file(output_directory.joinpath(name + ".c"), name, thermistor_data)
 
     return 0
