@@ -64,6 +64,7 @@
 
 #define DEBUG_SERIAL
 #define DEBUG_TEMP 0
+#define DEBUG_POT 0
 //#define DEBUG_CURRENT_RMS
 //#define DEBUG_CURRENT_VOLTAGE
 
@@ -251,7 +252,7 @@ void loop()
             break;
 
         case APP_STATE_MANUAL_CONTROL:
-            motor_pwm = pot_value;
+            motor_pwm =  pot_value >> 2U;
             break;
 
         case APP_STATE_FULL_STEAM:
@@ -274,6 +275,7 @@ void loop()
         // Report few things about current states
         previous_time = *time;
         LOG_CUSTOM("temperature : %hd °C\n", temperature);
+        LOG_CUSTOM("Current motor_pwm %u\n", motor_pwm);
 
 #ifdef DEBUG_CURRENT_VOLTAGE
         for (uint8_t i = 0; i < CURRENT_MEASURE_SAMPLES_PER_SINE; i++)
@@ -299,8 +301,6 @@ static void read_button_event(button_state_t* const event, const mcu_time_t* tim
     read_single_button_event(&button_mem, &time->seconds);
     *event = button_mem.event;
 }
-
-
 
 
 void set_motor_output(const uint8_t value)
@@ -340,9 +340,10 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
 
 static void read_potentiometer(const mcu_time_t* time, uint16_t* value)
 {
-    *value = analogRead(potentiometer_pin);
-#if DEBUG_TEMP
-        LOG_CUSTOM("Pot value : %u /1024\n", potentiometer_pin);
+    // The potentiometer itself is wired backwards !
+    *value = 1023 - (uint16_t) analogRead(potentiometer_pin);
+#if DEBUG_POT
+        LOG_CUSTOM("Pot value : %u\n", *value);
 #endif
 }
 
