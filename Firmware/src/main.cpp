@@ -9,6 +9,7 @@
 #include "Core/mcu_time.h"
 #include "Core/thermistor.h"
 #include "Core/ntc_10k_3977.h"
+#include "Core/sliding_average.h"
 
 #include "Core/led.h"
 
@@ -19,53 +20,15 @@
 // -> Clang has troubles treating multiline macros comments
 // https://github.com/llvm/llvm-project/issues/54399
 
-
-// ################################################################################################################################################
-// ################################################### Read-only data & configs ###################################################################
-// ################################################################################################################################################
-
-// Permanent storage header and footer are used to make sure EEPROM was already
-// used and is valid. These are default constant values which is really
-// unlikely we'll find in the EEPROM straight from factory. They will be used
-// to invalidate cached values and trigger board auto-learning
-#define PERMANENT_STORAGE_HEADER 0xDE
-#define PERMANENT_STORAGE_FOOTER 0xAD
-
-
-#define SAMPLES_PER_SINE  20U   /**> How many samples we are using to depict a full sine wave.                           */
-                                /**> Appropriate values might range from 10 to 20                                        */
-
-#define STALLED_CURRENT_MULTIPLIER_PERCENT 20U /**> Used to detect overcurrent conditions.                               */
-                                               /**> Inrush current is several times bigger than normal current           */
-
-#define STEADY_MOTOR_RUNTIME 5U  /**> Minimum time to wait after motor is triggered to consider it in                    */
-                                 /**> it's normal operation mode                                                         */
-
-#define STALLED_MOTOR_WAIT_MINUTES 5U                                  /**> How long we'll need to wait between motor starts when motor is stalled  */
-#define STALLED_MOTOR_WAIT_SECONDS (STALLED_MOTOR_WAIT_MINUTES * 60U)  /**> Same as above in seconds                                                */
-#define STALLED_MOTOR_IMMUNE_PERIOD_AFTER_RESTART 10U                  /**> How long (in seconds) we prevent over current detection after a restart */
-
-#define MAINS_AC_FREQUENCY_HZ 50U           /**> Mains outlet AC frequency (50 Hz in France)                            */
-
-#define CURRENT_SENSOR_CHECK_RATE_HZ uint16_t(SAMPLES_PER_SINE * MAINS_AC_FREQUENCY_HZ)    /**> Current sensor check rate (frequency) - Hz               */
-
-// Compiles down to constant anyway !
-#define CURRENT_SENSOR_CHECK_PERIOD_MS uint8_t(1000 / CURRENT_SENSOR_CHECK_RATE)        /**> Current sensor check time period in milliseconds (between 2 sensor reads) */
-#define CURRENT_SENSE_DC_BIAS_MV 2390
-
-#define TEMP_HYSTERESIS_HIGH 2U     /**> Upper limit of the hysteresis window. If temp gets higher than 2°C above the target temp, we start the compressor  */
-#define TEMP_HYSTERESIS_LOW 2U      /**> Lower limit of the hysteresis window. If temp gets lower than 2°C below the target temp, we stop the compressor    */
-
-
 // ################################################################################################################################################
 // ################################################### Debugging defines and flags ################################################################
 // ################################################################################################################################################
 
 
 #define DEBUG_SERIAL
-#define DEBUG_TEMP 0
+#define DEBUG_TEMP 1
 #define DEBUG_POT 0
-//#define DEBUG_CURRENT_RMS
+//#define
 //#define DEBUG_CURRENT_VOLTAGE
 
 //#define CURRENT_LED_DEBUG
@@ -122,6 +85,13 @@ typedef enum
     APP_STATE_DISABLED          /**> Motor is disabled                                      */
 } app_state_t;
 
+typedef enum
+{
+    LED_GREEN,
+    LED_RED,
+    LED_OFF
+} led_state_t;
+
 #define APP_STATE_ENUM_COUNT 4U
 
 typedef struct
@@ -155,6 +125,7 @@ static void read_button_event(button_state_t* const event, const mcu_time_t* tim
 static void set_motor_output(const uint8_t value);
 static void read_temperature(const mcu_time_t* time, int8_t* temperature);
 static void read_potentiometer(const mcu_time_t* time, uint16_t* value);
+static void set_leds_states(const led_state_t state);
 
 #ifndef NO_CURRENT_MONITORING
 static app_state_t handle_motor_stalled_loop(uint32_t const* const start_time, const mcu_time_t* time);
@@ -236,7 +207,7 @@ void loop()
             if(temperature >= 20)
             {
                 range_uint8_t input_range = {
-                    .start = 20,
+                    .start = 31,
                     .end = 40
                 };
                 range_uint8_t output_range = {
@@ -244,6 +215,7 @@ void loop()
                     .end = UINT8_MAX
                 };
                 motor_pwm = interpolation_linear_uint8_to_uint8((uint8_t) temperature, &input_range, &output_range);
+                set_leds_states(LED_RED);
             }
             else
             {
@@ -252,15 +224,18 @@ void loop()
             break;
 
         case APP_STATE_MANUAL_CONTROL:
+            set_leds_states(LED_GREEN);
             motor_pwm =  pot_value >> 2U;
             break;
 
         case APP_STATE_FULL_STEAM:
+            set_leds_states(LED_OFF);
             motor_pwm = UINT8_MAX;
             break;
 
         case APP_STATE_DISABLED:
         default: {
+            set_leds_states(LED_OFF);
             motor_pwm = 0;
             break;
         }
@@ -287,19 +262,68 @@ void loop()
 #endif
 }
 
+static void set_leds_states(const led_state_t state)
+{
+    switch(state)
+    {
+        case LED_RED:
+            digitalWrite(status_led_pin_1, HIGH);
+            digitalWrite(status_led_pin_2, LOW);
+            break;
+
+        case LED_GREEN:
+            digitalWrite(status_led_pin_1, LOW);
+            digitalWrite(status_led_pin_2, HIGH);
+            break;
+
+        case LED_OFF:
+        default:
+            digitalWrite(status_led_pin_1, LOW);
+            digitalWrite(status_led_pin_2, LOW);
+            break;
+    }
+}
+
+
 static void read_button_event(button_state_t* const event, const mcu_time_t* time)
 {
+    //     5V
+    //    ┌┴┐
+    //    │ │
+    //    └┬┘
+    //   ┌─┴─┐┄┄┄┄┄┄┄┄ Input line to Arduino
+    //  ─┴─  O │
+    //  ─┬─    ├─ <----- Switch (push button)
+    //   │   O │
+    //   └─┬─┘
+    //     ╧ GND
+
     static button_local_mem_t button_mem = {
-        .current  = LOW,
-        .previous = LOW,
+        .current  = HIGH,       // Starts up as a high state (button is not pressed, hence no current flows through it)
+        .previous = HIGH,
         .pressed  = 0,
         .event    = BUTTON_STATE_RELEASED,
     };
 
-    button_mem.current  = digitalRead(button_pin);
+    // Need to check buttons every 20 milliseconds (50Hz)
+    static mcu_time_t last_checked = {0};
+    static const mcu_time_t time_check_interval {
+        .seconds = 0,
+        .milliseconds = 20
+    };
 
-    read_single_button_event(&button_mem, &time->seconds);
-    *event = button_mem.event;
+    // Compute how it's been since we last checked the buttons states
+    mcu_time_t diff = {0};
+    time_duration(time, &last_checked, &diff);
+    if(time_compare(&diff, &time_check_interval) == TIME_COMP_GT)
+    {
+        last_checked = *time;
+
+        button_mem.current = digitalRead(button_pin);
+
+        read_single_button_event(&button_mem, &time->seconds);
+        *event = button_mem.event;
+    }
 }
 
 
@@ -311,6 +335,7 @@ void set_motor_output(const uint8_t value)
 static void read_temperature(const mcu_time_t* time, int8_t* temperature)
 {
     static uint32_t last_check_s = 0;
+    static sliding_avg_t avg = {0};
 
     // Only trigger temperature reading if elapsed time is greater than 1 second.
     if (time->seconds - last_check_s >= 1U)
@@ -325,7 +350,8 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
         uint16_t ntc_resistance = 0;
         bridge_get_lower_resistance(&upper_resistance, &temp_reading_mv, &vcc_mv, &ntc_resistance);
 
-        *temperature = thermistor_read_temperature(&ntc_10k_3977_data, &ntc_resistance);
+        int8_t temp_reading = thermistor_read_temperature(&ntc_10k_3977_data, &ntc_resistance);
+        sliding_avg_push(&avg, temp_reading, temperature);
 
 #if DEBUG_TEMP
         LOG_CUSTOM("Temp mv : %u mV\n", temp_reading_mv)

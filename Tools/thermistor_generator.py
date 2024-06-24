@@ -11,7 +11,7 @@ from argparse import ArgumentParser
 # Generates thermistor data c source files that exposes thermistor data
 C_THERMISTOR_MAX_SAMPLES = 50
 C_MIN_TEMP = -24
-C_MAX_TEMP = 25
+C_MAX_TEMP = 100
 C_TEMP_STEP = 1
 C_KELVIN_TO_DEG = 273.15
 C_CALIB_TEMP = 25 + C_KELVIN_TO_DEG
@@ -111,9 +111,9 @@ def main(args : list[str]) -> int:
     parser.add_argument("r0", help="Base resistance value of NTC thermistor (in KOhms)")
     parser.add_argument("beta", help="Thermistor thermal constant (β constant)")
     parser.add_argument("name", help="Name of the output file (e.g. \"thermistor_100k_3950K\")")
-    parser.add_argument("--min", default=-24, help="Minimum temperature (°Celsius) - integer")
-    parser.add_argument("--max", default=25, help="Maximum temperature (°Celsius) - integer")
-    parser.add_argument("--count", default=10, help="Number of desired data values in generated source file")
+    parser.add_argument("--min", help="Minimum temperature (°Celsius) - integer")
+    parser.add_argument("--max", help="Maximum temperature (°Celsius) - integer")
+    parser.add_argument("--count", help="Number of desired data values in generated source file")
 
     parsed = parser.parse_args(args)
     r0 = int(parsed.r0)
@@ -136,7 +136,7 @@ def main(args : list[str]) -> int:
 
 
     print("1 - Generating thermistor data")
-    thermistor_data = generate_data(r0, beta, count - 1, C_MIN_TEMP, C_MAX_TEMP)
+    thermistor_data = generate_data(r0, beta, count - 1, min_temp, max_temp)
     print("2 - Generating header file")
     generate_header(output_directory.joinpath(name + ".h"), name, len(thermistor_data.data))
     print(f"3 - Generating source file in {output_directory}")
