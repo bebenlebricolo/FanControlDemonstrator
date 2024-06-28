@@ -20,8 +20,8 @@ add_library(core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mcu_time.c
     ${CMAKE_CURRENT_SOURCE_DIR}/thermistor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/thermistor.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/thermistor_ntc_100k_3950K.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/thermistor_ntc_100k_3950K.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ntc_10k_3977.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/ntc_10k_3977.h
 )
 
 add_subdirectory(Tests

@@ -239,6 +239,10 @@ TEST_F(LedFixture, led_get_on_time_ticks_test)
     ASSERT_EQ(duty_on_time_map.size(), 101);
 }
 
+#if defined(WIN32) && defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4702) // Removes unreachable code
+#endif
 TEST_F(LedFixture, led_process_pattern_breathing_test)
 {
     GTEST_SKIP() << "Test skipped as led breathing pattern test is not trivial to write (...)";
@@ -303,6 +307,10 @@ TEST_F(LedFixture, led_process_pattern_breathing_test)
 
     ASSERT_EQ(on_times[LED_BLINK_BREATHING_HALF_CYCLE_STEPS], LED_BLINK_BREATHING_RESOLUTION_MS / 2U);
 }
+
+#if defined(WIN32) && defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 int main(int argc, char **argv)
 {
