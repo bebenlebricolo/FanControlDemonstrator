@@ -362,9 +362,9 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
 #if DEBUG_TEMP
         LOG_CUSTOM("Temp mv : %u mV\n", temp_reading_mv)
         LOG_CUSTOM("Vcc mv : %u mV\n", vcc_mv)
-        LOG_CUSTOM("Upper resistance : %u k\n", upper_resistance)
+        LOG_CUSTOM("Upper resistance : %lu k\n", upper_resistance)
         LOG_CUSTOM("Temperature : %d °C\n\n", (int)*temperature)
-        LOG_CUSTOM("NTC res : %u k\n", ntc_resistance)
+        LOG_CUSTOM("NTC res : %lu k\n", ntc_resistance)
         LOG_CUSTOM("Temp raw : %u /1024\n", temp_reading_raw)
 #endif
     }

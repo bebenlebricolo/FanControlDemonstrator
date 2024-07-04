@@ -38,6 +38,37 @@ interpolation_range_check_t interpolation_check_value_range_uint16(uint16_t cons
     return RANGE_CHECK_INCLUDED;
 }
 
+interpolation_range_check_t interpolation_check_value_range_uint32(uint32_t const *const value, range_uint32_t const *const range)
+{
+    bool positive_range = range->start < range->end;
+    if (positive_range)
+    {
+        if (*value < range->start)
+        {
+            return RANGE_CHECK_LEFT;
+        }
+
+        if (*value > range->end)
+        {
+            return RANGE_CHECK_RIGHT;
+        }
+    }
+    else
+    {
+        if (*value > range->start)
+        {
+            return RANGE_CHECK_LEFT;
+        }
+
+        if (*value < range->end)
+        {
+            return RANGE_CHECK_RIGHT;
+        }
+    }
+
+    return RANGE_CHECK_INCLUDED;
+}
+
 interpolation_range_check_t interpolation_check_value_range_uint8(const uint8_t value, range_uint8_t const *const range)
 {
     bool positive_range = range->start < range->end;
@@ -99,6 +130,45 @@ int8_t interpolation_linear_uint16_to_int8(uint16_t const *const value, range_ui
     in_tmp /= in_delta;
 
     int16_t tmp_result = (in_tmp * (int16_t)out_delta);
+    tmp_result /= UINT16_ALIASING_FACTOR;
+
+    tmp_result += out->start;
+
+    int8_t result = (int8_t)(tmp_result);
+
+    return result;
+}
+
+int8_t interpolation_linear_uint32_to_int8(uint32_t const *const value, range_uint32_t const *const in, range_int8_t const *const out)
+{
+    interpolation_range_check_t checked_value = interpolation_check_value_range_uint32(value, in);
+    switch (checked_value)
+    {
+        case RANGE_CHECK_LEFT:
+            // Clamp data to the start of output range
+            return out->start;
+
+        case RANGE_CHECK_RIGHT:
+            // Clamp data to the end of output range
+            return out->end;
+
+        case RANGE_CHECK_INCLUDED:
+        default:
+            break;
+    }
+
+    int32_t in_delta  = in->end - in->start;
+    int8_t  out_delta = out->end - out->start;
+
+    // Note : using UINT16_ALIASING_FACTOR is a small trick to get back some resolution.
+    // By nature, value is always contained within the range we need to check.
+    // As a result, (*value - in->start) <= in_delta.
+    // So dividing *value - in->start is always less than 1, hence loss in precision
+    int32_t in_tmp = ((int32_t)*value - (int32_t)in->start);
+    in_tmp *= UINT16_ALIASING_FACTOR;
+    in_tmp /= in_delta;
+
+    int32_t tmp_result = (in_tmp * (int32_t)out_delta);
     tmp_result /= UINT16_ALIASING_FACTOR;
 
     tmp_result += out->start;

@@ -90,6 +90,6 @@ int8_t thermistor_read_temperature(thermistor_data_t const * const thermistor, r
     };
 
     // Then linearly interpolate the value within the boundaries
-    result = interpolation_linear_uint16_to_int8(resistance, &res_range, &temp_range);
+    result = interpolation_linear_uint32_to_int8(resistance, &res_range, &temp_range);
     return result;
 }
