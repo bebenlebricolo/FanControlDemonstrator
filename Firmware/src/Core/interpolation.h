@@ -36,6 +36,9 @@ MAKE_RANGE(uint8_t);
 MAKE_RANGE(int8_t);
 MAKE_RANGE(uint16_t);
 MAKE_RANGE(int16_t);
+MAKE_RANGE(uint32_t);
+MAKE_RANGE(int32_t);
+MAKE_RANGE(size_t);
 
 /**
  * @brief interpolates the value within the input range into the output range.

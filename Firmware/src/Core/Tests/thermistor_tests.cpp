@@ -31,7 +31,7 @@ const thermistor_data_t ThermistorFixture::thermistor_data = {
 
 TEST_F(ThermistorFixture, thermistor_resistance_framing)
 {
-    uint16_t resistance = 1400;
+    resistance_t resistance = 1400;
 
     thermistor_temp_res_t const * low;
     thermistor_temp_res_t const * high;
@@ -75,7 +75,7 @@ TEST_F(ThermistorFixture, thermistor_resistance_framing)
 
 TEST_F(ThermistorFixture, thermistor_read_temperature)
 {
-    uint16_t resistance = 2000;
+    resistance_t resistance = 2000;
 
     // Testing really out of bounds
     int8_t temp = thermistor_read_temperature(&thermistor_data, &resistance);

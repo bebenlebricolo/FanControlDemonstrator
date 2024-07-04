@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(NanoThermostat_CoreLib C CXX)
 
 add_library(core STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_types.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bridge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bridge.h
     ${CMAKE_CURRENT_SOURCE_DIR}/interpolation.c

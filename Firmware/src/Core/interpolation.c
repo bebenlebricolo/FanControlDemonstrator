@@ -87,8 +87,8 @@ int8_t interpolation_linear_uint16_to_int8(uint16_t const *const value, range_ui
             break;
     }
 
-    int16_t in_delta = in->end - in->start;
-    int8_t out_delta = out->end - out->start;
+    int16_t in_delta  = in->end - in->start;
+    int8_t  out_delta = out->end - out->start;
 
     // Note : using UINT16_ALIASING_FACTOR is a small trick to get back some resolution.
     // By nature, value is always contained within the range we need to check.
@@ -108,7 +108,7 @@ int8_t interpolation_linear_uint16_to_int8(uint16_t const *const value, range_ui
     return result;
 }
 
-uint8_t interpolation_linear_uint8_to_uint8(const uint8_t value, range_uint8_t const *const in, range_uint8_t const *const out)
+uint8_t interpolation_linear_uint8_to_uint8(const uint8_t value, range_uint8_t const* const in, range_uint8_t const* const out)
 {
     interpolation_range_check_t checked_value = interpolation_check_value_range_uint8(value, in);
     switch (checked_value)

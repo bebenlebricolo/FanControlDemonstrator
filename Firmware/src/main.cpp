@@ -24,10 +24,12 @@
 // ################################################### Debugging defines and flags ################################################################
 // ################################################################################################################################################
 
+#define NTC_RESISTOR_MULTIPLICATOR 10U
 
 #define DEBUG_SERIAL
 #define DEBUG_TEMP 1
 #define DEBUG_POT 0
+#define DISABLE_MOTOR
 //#define
 //#define DEBUG_CURRENT_VOLTAGE
 
@@ -65,10 +67,10 @@ const uint8_t status_led_pin_1  = 7; // D7
 const uint8_t status_led_pin_2  = 6; // D6
 
 const uint8_t  button_pin         = 3; // D3
-const uint8_t  temp_sensor_pin    = A3;    /**> NTC thermistor temperature sensor input pin             */
-const uint8_t  potentiometer_pin  = A2;    /**> Current sens input pin, sampled @ 500Hz - 1kHz          */
-const uint16_t upper_resistance   = 10U;   /**> 320 kOhms resistor is used as the upper bridge resistor */
-const uint16_t vcc_mv             = 5000U; /**> Board is powered via USB -> 5V                          */
+const uint8_t  temp_sensor_pin    = A3;     /**> NTC thermistor temperature sensor input pin             */
+const uint8_t  potentiometer_pin  = A2;     /**> Current sens input pin, sampled @ 500Hz - 1kHz          */
+const uint32_t upper_resistance   = 10000U; /**> 10 kOhms resistor is used as the upper bridge resistor */
+const uint16_t vcc_mv             = 5000U;  /**> Board is powered via USB -> 5V                          */
 
 // ################################################################################################################################################
 // ################################################### Application state machine ##################################################################
@@ -241,7 +243,11 @@ void loop()
         }
     }
 
+#ifndef DISABLE_MOTOR
     set_motor_output(motor_pwm);
+#else
+    set_motor_output(0);
+#endif
     app_mem.button.prev  = app_mem.button.now;
 
 #if DEBUG_REPORT_PERIODIC == 1
@@ -347,7 +353,7 @@ static void read_temperature(const mcu_time_t* time, int8_t* temperature)
         // millivolt reading Also, this remains right under the overflow : (5000 x 10 < UINT16_MAX)
         uint16_t temp_reading_mv = (((vcc_mv * 10U) / 1024) * temp_reading_raw) / 10U;
 
-        uint16_t ntc_resistance = 0;
+        uint32_t ntc_resistance = 0;
         bridge_get_lower_resistance(&upper_resistance, &temp_reading_mv, &vcc_mv, &ntc_resistance);
 
         int8_t temp_reading = thermistor_read_temperature(&ntc_10k_3977_data, &ntc_resistance);

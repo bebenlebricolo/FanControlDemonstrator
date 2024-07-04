@@ -57,8 +57,8 @@ def generate_header(filepath : Path, name : str, sample_count : int) -> None :
         write_cplusplus_extern_end(file)
         file.write(f"#endif /* {header_define} */\n")
 
-def generate_data(r0 : int, beta : int, count : int, min_temp : int, max_temp : int) -> ThermistorData :
-    thermistor_data = ThermistorData()
+def generate_data(r0 : int, beta : int, count : int, min_temp : int, max_temp : int, unit : ResistanceUnit = ResistanceUnit.KiloOhms) -> ThermistorData :
+    thermistor_data = ThermistorData(unit=unit)
     delta = (max_temp - min_temp) / count
     interval : list[int] = []
 

@@ -8,8 +8,10 @@ extern "C" {
 
 #include <stdint.h>
 #include "interpolation.h"
+#include "common_types.h"
 
 #define THERMISTOR_MAX_SAMPLES 50U
+
 
 /**
  * @brief Encodes the actual scaler for the thermistor base resistance
@@ -27,7 +29,7 @@ typedef enum
 typedef struct
 {
     int8_t            temperature;  /**> Temperature data (ranging from -24°C usually to +25°C, 1 degree increment)                 */
-    uint16_t          resistance;   /**> Resistance of the thermistor at the given temperature (unit given below, default is KOhms) */
+    resistance_t      resistance;   /**> Resistance of the thermistor at the given temperature (unit given below, default is KOhms) */
 } thermistor_temp_res_t;
 
 /**
@@ -51,7 +53,7 @@ typedef struct {
  * TODO : Implement out-of-bounds data extrapolation if the need arise get past the input data curve.
  *
 */
-int8_t thermistor_read_temperature(thermistor_data_t const * const thermistor, uint16_t const * const resistance);
+int8_t thermistor_read_temperature(thermistor_data_t const * const thermistor, resistance_t const * const resistance);
 
 /**
  * @brief finds the enclosing range that contains the input resistance within the thermistor data curve.
@@ -72,7 +74,7 @@ int8_t thermistor_read_temperature(thermistor_data_t const * const thermistor, u
  *      RANGE_CHECK_LEFT     : input value is NOT included within the two values range, and is on the left side of the range.
  *      RANGE_CHECK_RIGHT    : input value is NOT included within the two values range, and is on the right side of the range.
 */
-interpolation_range_check_t thermistor_frame_value(thermistor_data_t const * const thermistor, uint16_t const * const resistance, thermistor_temp_res_t const ** low, thermistor_temp_res_t const ** high);
+interpolation_range_check_t thermistor_frame_value(thermistor_data_t const * const thermistor, resistance_t const * const resistance, thermistor_temp_res_t const ** low, thermistor_temp_res_t const ** high);
 
 #ifdef __cplusplus
 }
